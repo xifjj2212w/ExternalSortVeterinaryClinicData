@@ -1,0 +1,204 @@
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox, scrolledtext
+import threading
+import ctypes
+import os
+
+# Импорт ваших модулей
+import generate
+import external_sort_python
+
+class SortApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Лабораторная 5.1 - Внешняя сортировка")
+        self.root.geometry("700x550")
+        self.root.resizable(False, False)
+
+        # --- Загрузка C++ библиотеки ---
+        self.cpp_lib = None
+        self.cpp_error_msg = ""
+        self.load_cpp_library()
+
+        # --- Создание интерфейса ---
+        self.create_widgets()
+
+    def load_cpp_library(self):
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        lib_filename = None
+        
+        for ext in ['.dll', '.so', '.dylib']:
+            path = os.path.join(script_dir, f"external_sort_lib{ext}")
+            if os.path.exists(path):
+                lib_filename = path
+                break
+                
+        if not lib_filename:
+            self.cpp_error_msg = (
+                f"Библиотека C++ не найдена в папке:\n{script_dir}\n\n"
+                "Ожидается файл: external_sort_lib.dll / .so / .dylib\n\n"
+                "Команда для компиляции (Windows MinGW):\n"
+                "g++ -O3 -static -static-libgcc -static-libstdc++ -shared -o external_sort_lib.dll external_sort_cpp.cpp"
+            )
+            return
+
+        try:
+            self.cpp_lib = ctypes.CDLL(lib_filename)
+            # Обновленная сигнатура: добавлен параметр order_str (4-й char_p)
+            self.cpp_lib.external_sort_cpp.argtypes = [
+                ctypes.c_char_p, 
+                ctypes.c_char_p, 
+                ctypes.c_char_p, 
+                ctypes.c_char_p, 
+                ctypes.POINTER(ctypes.c_double)
+            ]
+            self.cpp_lib.external_sort_cpp.restype = None
+            print(f"[УСПЕХ] C++ библиотека загружена: {lib_filename}")
+        except Exception as e:
+            self.cpp_error_msg = f"Ошибка при загрузке C++ библиотеки:\n{e}"
+            print(self.cpp_error_msg)
+
+    def create_widgets(self):
+        # === Блок работы с файлом ===
+        frame_file = ttk.LabelFrame(self.root, text="1. Подготовка данных")
+        frame_file.pack(fill="x", padx=10, pady=5)
+
+        self.file_path = tk.StringVar(value="data.csv")
+        ttk.Entry(frame_file, textvariable=self.file_path, width=45).pack(side="left", padx=5, pady=5)
+        ttk.Button(frame_file, text="Обзор...", command=self.browse_file).pack(side="left", padx=2)
+        ttk.Button(frame_file, text="Сгенерировать (>1 ГБ)", command=self.generate_file).pack(side="left", padx=5)
+
+        # === Блок настроек сортировки ===
+        frame_settings = ttk.LabelFrame(self.root, text="2. Настройки сортировки")
+        frame_settings.pack(fill="x", padx=10, pady=5)
+
+        ttk.Label(frame_settings, text="Ключ:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
+        self.sort_key = ttk.Combobox(frame_settings, values=[
+            "record_id", "pet_id", "pet_type", "pet_name", "breed", 
+            "owner_name", "vaccine_name", "vaccination_date", 
+            "next_due_date", "veterinarian", "clinic_branch"
+        ], width=18)
+        self.sort_key.set("record_id")
+        self.sort_key.grid(row=0, column=1, padx=5, pady=5)
+
+        ttk.Label(frame_settings, text="Порядок:").grid(row=0, column=2, padx=5, pady=5, sticky="w")
+        self.sort_order = ttk.Combobox(frame_settings, values=["По возрастанию", "По убыванию"], state="readonly", width=15)
+        self.sort_order.set("По возрастанию")
+        self.sort_order.grid(row=0, column=3, padx=5, pady=5)
+
+        ttk.Label(frame_settings, text="Язык:").grid(row=0, column=4, padx=5, pady=5, sticky="w")
+        self.lang = ttk.Combobox(frame_settings, values=["Python", "C++"], state="readonly", width=8)
+        self.lang.set("Python")
+        self.lang.grid(row=0, column=5, padx=5, pady=5)
+
+        # === Кнопка старта ===
+        self.btn_start = ttk.Button(self.root, text="▶ Начать сортировку", command=self.start_sort)
+        self.btn_start.pack(pady=10)
+
+        # === Блок времени выполнения ===
+        frame_time = ttk.LabelFrame(self.root, text="3. Время выполнения (секунды)")
+        frame_time.pack(fill="x", padx=10, pady=5)
+        
+        self.time_split = tk.StringVar(value="Разбиение: -")
+        self.time_merge = tk.StringVar(value="Слияние: -")
+        self.time_total = tk.StringVar(value="Итого: -")
+        
+        ttk.Label(frame_time, textvariable=self.time_split, font=("Arial", 9)).pack(side="left", padx=15, pady=5)
+        ttk.Label(frame_time, textvariable=self.time_merge, font=("Arial", 9)).pack(side="left", padx=15, pady=5)
+        ttk.Label(frame_time, textvariable=self.time_total, font=("Arial", 9, "bold")).pack(side="left", padx=15, pady=5)
+
+        # === Блок вывода результата ===
+        frame_result = ttk.LabelFrame(self.root, text="4. Проверка (Первые 10 строк отсортированного файла)")
+        frame_result.pack(fill="both", expand=True, padx=10, pady=5)
+        
+        self.text_result = scrolledtext.ScrolledText(frame_result, height=10, font=("Consolas", 9))
+        self.text_result.pack(fill="both", expand=True, padx=5, pady=5)
+
+    def browse_file(self):
+        filename = filedialog.askopenfilename(filetypes=[("CSV files", "*.csv"), ("All files", "*.*")])
+        if filename:
+            self.file_path.set(filename)
+
+    def generate_file(self):
+        self.btn_start.config(state="disabled")
+        self.root.config(cursor="watch")
+        self.root.title("Лаборатория 5.1 - ГЕНЕРАЦИЯ ФАЙЛА... Подождите...")
+        threading.Thread(target=self._gen_thread, daemon=True).start()
+
+    def _gen_thread(self):
+        try:
+            target_file = self.file_path.get()
+            generate.generate(target_file)
+            self.root.after(0, lambda: messagebox.showinfo("Успех", f"Файл '{target_file}' успешно сгенерирован!"))
+        except Exception as e:
+            self.root.after(0, lambda: messagebox.showerror("Ошибка генерации", str(e)))
+        finally:
+            self.root.config(cursor="")
+            self.root.title("Лабораторная 5.1 - Внешняя сортировка")
+            self.btn_start.config(state="normal")
+
+    def start_sort(self):
+        lang = self.lang.get()
+        
+        if lang == "C++" and self.cpp_lib is None:
+            messagebox.showerror("Ошибка C++", self.cpp_error_msg)
+            return
+            
+        input_f = self.file_path.get()
+        if not os.path.exists(input_f):
+            messagebox.showwarning("Внимание", f"Файл '{input_f}' не найден. Сначала сгенерируйте его!")
+            return
+
+        self.btn_start.config(state="disabled")
+        self.root.config(cursor="watch")
+        self.root.title(f"Лаборатория 5.1 - СОРТИРОВКА ({lang})... Подождите...")
+        threading.Thread(target=self._sort_thread, args=(lang,), daemon=True).start()
+
+    def _sort_thread(self, lang):
+        input_f = self.file_path.get()
+        output_f = "sorted.txt"
+        key = self.sort_key.get()
+        
+        # Преобразование выбора языка в параметр order
+        order_gui = self.sort_order.get()
+        order_param = "desc" if order_gui == "По убыванию" else "asc"
+        
+        try:
+            if lang == "Python":
+                s, m, t = external_sort_python.sort_python(input_f, output_f, key, order_param)
+            else:
+                times = (ctypes.c_double * 3)()
+                self.cpp_lib.external_sort_cpp(
+                    input_f.encode('utf-8'), 
+                    output_f.encode('utf-8'), 
+                    key.encode('utf-8'), 
+                    order_param.encode('utf-8'), # Передаем порядок в C++
+                    times
+                )
+                s, m, t = times[0], times[1], times[2]
+
+            self.time_split.set(f"Разбиение: {s:.2f} с")
+            self.time_merge.set(f"Слияние: {m:.2f} с")
+            self.time_total.set(f"Итого: {t:.2f} с")
+
+            self.text_result.delete(1.0, tk.END)
+            if os.path.exists(output_f):
+                with open(output_f, 'r', encoding='utf-8') as f:
+                    for _ in range(11):
+                        line = f.readline()
+                        if not line: break
+                        self.text_result.insert(tk.END, line)
+            else:
+                self.text_result.insert(tk.END, "Файл sorted.txt не был создан.")
+                    
+        except Exception as e:
+            self.root.after(0, lambda: messagebox.showerror("Ошибка сортировки", str(e)))
+        finally:
+            self.root.config(cursor="")
+            self.root.title("Лабораторная 5.1 - Внешняя сортировка")
+            self.btn_start.config(state="normal")
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = SortApp(root)
+    root.mainloop()
