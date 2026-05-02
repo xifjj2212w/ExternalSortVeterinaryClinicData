@@ -1,0 +1,55 @@
+import csv
+import random
+import os
+from datetime import datetime, timedelta
+
+TARGET_SIZE = 1.1 * 1024 * 1024 * 1024  # 1.1 ГБ
+
+pet_names = ["Max", "Bella", "Charlie", "Lucy", "Milo", "Luna"]
+breeds = ["Labrador", "Bulldog", "Siamese", "Persian", "Beagle"]
+owners = ["Ivanov", "Petrov", "Sidorov", "Smirnov"]
+vaccines = ["Rabies", "DHPP", "FVRCP", "Leptospirosis"]
+vets = ["Dr.Smith", "Dr.Brown", "Dr.White"]
+branches = ["North", "South", "East", "West"]
+
+def random_date():
+    start = datetime(2018, 1, 1)
+    end = datetime(2025, 1, 1)
+    delta = end - start
+    return start + timedelta(days=random.randint(0, delta.days))
+
+def generate(filename="data.csv"):
+    with open(filename, "w", newline='', encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow([
+            "record_id","pet_id","pet_type","pet_name","breed",
+            "owner_name","vaccine_name","vaccination_date",
+            "next_due_date","veterinarian","clinic_branch"
+        ])
+
+        record_id = 1
+
+        while os.path.getsize(filename) < TARGET_SIZE:
+            vacc_date = random_date()
+            next_date = vacc_date + timedelta(days=365)
+
+            writer.writerow([
+                record_id,
+                random.randint(1, 500000),
+                random.choice(["Dog", "Cat"]),
+                random.choice(pet_names),
+                random.choice(breeds),
+                random.choice(owners),
+                random.choice(vaccines),
+                vacc_date.strftime("%Y-%m-%d"),
+                next_date.strftime("%Y-%m-%d"),
+                random.choice(vets),
+                random.choice(branches)
+            ])
+
+            record_id += 1
+
+    print("Файл успешно создан:", filename)
+
+if __name__ == "__main__":
+    generate()
